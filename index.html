@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZAKUMA PHOTOBOTH</title>
+    
+    <!-- Memuat Pustaka MediaPipe Hands & Drawing Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --bg-color: #0a0a0a;
+            --panel-bg: rgba(20, 20, 20, 0.9);
+            --text-color: #e0e0e0;
+            --accent: #007bff;
+            --accent-green: #28a745;
+            --border-color: #333;
+            --control-width: 300px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-color); overflow: hidden; display: flex; height: 100vh; }
+
+        /* --- Panel Kontrol --- */
+        .control-panel {
+            flex: 0 0 var(--control-width);
+            padding: 20px;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            z-index: 10;
+            overflow-y: auto;
+        }
+
+        h1 { font-size: 19px; font-weight: 600; color: white; display: flex; align-items: center; gap: 8px; }
+        .subtitle { font-size: 11px; color: #888; margin-top: -10px; margin-bottom: 5px; }
+
+        .control-section { display: flex; flex-direction: column; gap: 6px; }
+        .section-label { font-size: 11px; font-weight: bold; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+
+        select, .btn {
+            width: 100%; padding: 10px; border-radius: 6px; font-size: 13px;
+            font-weight: 600; cursor: pointer; border: 1px solid #444; background: #2a2a2a; color: white;
+            transition: 0.2s; text-align: center; display: block;
+        }
+        select:hover { border-color: var(--accent); }
+        
+        .btn-group-hor { display: flex; gap: 5px; }
+        .btn-filter { background: #333; flex: 1; padding: 8px; font-size: 11px; }
+        .btn-filter.active { background: var(--accent); border-color: var(--accent); }
+        
+        .btn-primary { background: var(--accent-green); border-color: var(--accent-green); padding: 12px; font-size: 14px; }
+        .btn-primary:disabled { background: #444; border-color: #555; cursor: not-allowed; opacity: 0.5; }
+
+        /* Filter Video */
+        .filter-grayscale { filter: grayscale(100%); }
+        .filter-sepia { filter: sepia(100%); }
+
+        /* --- PALET WARNA BACKGROUND --- */
+        .bg-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 5px;
+        }
+        .bg-thumb {
+            width: 100%;
+            height: 40px;
+            border-radius: 6px;
+            border: 2px solid #444;
+            cursor: pointer;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .bg-thumb:hover { transform: scale(1.05); }
+        .bg-thumb.active { border-color: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+        /* Sensor Jari Status */
+        .sensor-status {
+            font-size: 12px; padding: 10px; border-radius: 6px;
+            background: rgba(0,0,0,0.3); border: 1px solid #444;
+            display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+        }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #555; transition: 0.3s; }
+        .status-dot.active { background: #0f0; box-shadow: 0 0 10px #0f0; }
+
+        /* --- Area Utama --- */
+        .main-display { flex: 1; position: relative; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        .stage-container { position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+        
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); position: absolute; z-index: 1; }
+        #gestureCanvas { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); z-index: 2; pointer-events: none; }
+
+        .v-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 180px; font-weight: bold; color: white;
+            background: rgba(0,0,0,0.6); text-shadow: 0 0 30px rgba(0,0,0,0.8);
+            display: none; z-index: 5; pointer-events: none;
+        }
+
+        /* --- Panel Pratinjau --- */
+        .preview-pane {
+            position: absolute; right: 20px; top: 20px; bottom: 20px;
+            width: 320px; background: rgba(15, 15, 15, 0.95);
+            border-radius: 12px; padding: 15px; display: flex; flex-direction: column;
+            align-items: center;
+            border: 1px solid var(--border-color); backdrop-filter: blur(10px);
+            z-index: 6; transition: transform 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+            overflow-y: auto;
+        }
+
+        #photoFrameContainer {
+            background: #ffffff; padding: 12px; width: 100%; max-height: 80vh; aspect-ratio: 4/3;
+            display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            position: relative; transition: background 0.3s, aspect-ratio 0.3s;
+        }
+
+        #imageGrid { width: 100%; flex: 1; display: grid; gap: 4px; position: relative; z-index: 1; }
+        .grid-item { background: #eee; overflow: hidden; display: flex; justify-content: center; align-items: center; border: 1px solid rgba(0,0,0,0.1); }
+        .grid-item img { width: 100%; height: 100%; object-fit: cover; }
+        .frame-footer { text-align: center; color: #333; font-size: 11px; font-weight: bold; margin-top: 6px; text-transform: uppercase; position: relative; z-index: 2; letter-spacing: 2px; }
+
+        canvas#hiddenCanvas, canvas#finalCanvas { display: none; }
+        .control-panel::-webkit-scrollbar { width: 5px; }
+        .control-panel::-webkit-scrollbar-thumb { background: #333; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="studio-container" style="display:flex; width:100%; height:100vh;">
+    <!-- PANEL KONTROL -->
+    <aside class="control-panel">
+        <div>
+            <h1>ZAKUMA PHOTOBOTH</h1>
+            <p class="subtitle">ATUR UKKURAN</p>
+        </div>
+
+        <div class="sensor-status">
+            <div id="sensorDot" class="status-dot"></div>
+            <span id="sensorText">Memuat sensor...</span>
+        </div>
+
+        <!-- OPSI TEMA/WARNA BACKGROUND -->
+        <div class="control-section">
+            <label class="section-label">1. Warna Background Foto</label>
+            <div class="bg-grid">
+                <div class="bg-thumb active" style="background: #ffffff;" title="Classic White" onclick="setBgTheme('#ffffff', '#333333', this)"></div>
+                <div class="bg-thumb" style="background: #111111;" title="Dark Mode" onclick="setBgTheme('#111111', '#ffffff', this)"></div>
+                <div class="bg-thumb" style="background: linear-gradient(135deg, #ff9a9e, #fecfef);" title="Pastel Pink" onclick="setBgTheme('gradient-pink', '#ffffff', this)"></div>
+                <div class="bg-thumb" style="background: linear-gradient(135deg, #a1c4fd, #c2e9fb);" title="Soft Blue" onclick="setBgTheme('gradient-blue', '#1b365d', this)"></div>
+                <div class="bg-thumb" style="background: linear-gradient(135deg, #f6d365, #fda085);" title="Sunset Peach" onclick="setBgTheme('gradient-peach', '#4a2c00', this)"></div>
+                <div class="bg-thumb" style="background: #2d3748;" title="Slate Gray" onclick="setBgTheme('#2d3748', '#e2e8f0', this)"></div>
+                <div class="bg-thumb" style="background: #1a365d;" title="Navy" onclick="setBgTheme('#1a365d', '#e2e8f0', this)"></div>
+                <div class="bg-thumb" style="background: #22543d;" title="Vintage Green" onclick="setBgTheme('#22543d', '#e2e8f0', this)"></div>
+            </div>
+        </div>
+
+        <div class="control-section">
+            <label class="section-label">2. Ukuran Kertas</label>
+            <select id="sizeSelect" onchange="updateFrameSize()">
+                <option value="4:3">Lanskap (4:3)</option>
+                <option value="1:1">Kotak (1:1)</option>
+                <option value="9:16">Story (9:16)</option>
+                <option value="2:6">Strip (2:6)</option>
+            </select>
+        </div>
+
+        <div class="control-section">
+            <label class="section-label">3. Tata Letak Grid</label>
+            <select id="gridSelect" onchange="updateGrid()"></select>
+        </div>
+
+        <div class="control-section">
+            <label class="section-label">4. Filter Foto</label>
+            <div class="btn-group-hor">
+                <button class="btn btn-filter active" onclick="setFilter('', this)">Normal</button>
+                <button class="btn btn-filter" onclick="setFilter('filter-grayscale', this)">B&W</button>
+                <button class="btn btn-filter" onclick="setFilter('filter-sepia', this)">Sepia</button>
+            </div>
+        </div>
+
+        <div class="control-section" style="margin-top: auto; padding-top: 15px;">
+            <p style="font-size:10px; color:#aaa; text-align:center; margin-bottom:10px;">🖐️ 5 Jari: Foto | ✌️ 2 Jari: Ulangi | 👌 OK: Unduh | ☝️ 1 Jari: Sensor ON/OFF</p>
+            <button id="startBtn" class="btn btn-primary" onclick="startSession()" disabled>Memuat Kamera...</button>
+            <div id="postCaptureButtons" class="btn-group-hor" style="display:none;">
+                <button class="btn" style="background:#333;" onclick="resetStudio()">Ulangi</button>
+                <button class="btn" style="background:var(--accent);" onclick="downloadPhoto()">Unduh</button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- AREA UTAMA -->
+    <main class="main-display">
+        <div class="stage-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="gestureCanvas"></canvas>
+            <div id="v-overlay" class="v-overlay">3</div>
+        </div>
+
+        <div class="preview-pane" id="previewPane" style="transform: translateX(120%);">
+            <p style="text-align:center; font-size:12px; color:#aaa; margin-bottom:10px; font-weight:bold; text-transform:uppercase;">Pratinjau Hasil</p>
+            <div id="photoFrameContainer">
+                <div id="imageGrid"></div>
+                <div class="frame-footer" id="frameFooterText">ZAKUMA PHOTOSTUDIO</div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<canvas id="hiddenCanvas"></canvas>
+<canvas id="finalCanvas"></canvas>
+
+<script>
+    const gridConfigs = {
+        '1': { label: '1 Foto (1x1)', cols: 1, rows: 1 },
+        '2h': { label: '2 Foto Horisontal (2x1)', cols: 2, rows: 1 },
+        '2v': { label: '2 Foto Vertikal (1x2)', cols: 1, rows: 2 },
+        '3h': { label: '3 Foto Horisontal (3x1)', cols: 3, rows: 1 },
+        '3v': { label: '3 Foto Vertikal (1x3)', cols: 1, rows: 3 },
+        '4grid': { label: '4 Foto Grid (2x2)', cols: 2, rows: 2 },
+        '4v': { label: '4 Foto Vertikal (1x4)', cols: 1, rows: 4 },
+        '6grid': { label: '6 Foto Grid (3x2)', cols: 3, rows: 2 },
+        '9grid': { label: '9 Foto Grid (3x3)', cols: 3, rows: 3 }
+    };
+
+    const ratioToGridMap = {
+        "4:3": ['1', '2h', '3h', '4grid', '6grid'],
+        "1:1": ['1', '4grid', '9grid'],
+        "9:16": ['1', '2v', '3v', '4v'],
+        "2:6": ['2v', '3v', '4v']
+    };
+
+    const video = document.getElementById('video');
+    const gestureCanvas = document.getElementById('gestureCanvas');
+    const gestureCtx = gestureCanvas.getContext('2d');
+    
+    const photoFrameContainer = document.getElementById('photoFrameContainer');
+    const frameFooterText = document.getElementById('frameFooterText');
+    
+    let activeBgColor = '#ffffff';
+    let activeTextColor = '#333333';
+
+    const startBtn = document.getElementById('startBtn');
+    const sensorDot = document.getElementById('sensorDot');
+    const sensorText = document.getElementById('sensorText');
+    const vOverlay = document.getElementById('v-overlay');
+    const previewPane = document.getElementById('previewPane');
+    const hiddenCanvas = document.getElementById('hiddenCanvas');
+
+    let currentPhotos = [];
+    let isCapturing = false;
+    let gestureEnabled = false;
+    let handDetected = false;
+    let isDownloaded = false;
+
+    // VARIABEL DETEKSI SENSOR & DEBOUNCE
+    let isSensorActive = true; 
+    let lastGestureTime = 0;
+    const GESTURE_COOLDOWN = 1500; 
+
+    function setBgTheme(color, textColor, el) {
+        document.querySelectorAll('.bg-thumb').forEach(b => b.classList.remove('active'));
+        if(el) el.classList.add('active');
+
+        activeBgColor = color;
+        activeTextColor = textColor;
+
+        if (color.startsWith('gradient-pink')) {
+            photoFrameContainer.style.background = 'linear-gradient(135deg, #ff9a9e, #fecfef)';
+        } else if (color.startsWith('gradient-blue')) {
+            photoFrameContainer.style.background = 'linear-gradient(135deg, #a1c4fd, #c2e9fb)';
+        } else if (color.startsWith('gradient-peach')) {
+            photoFrameContainer.style.background = 'linear-gradient(135deg, #f6d365, #fda085)';
+        } else {
+            photoFrameContainer.style.background = color;
+        }
+        
+        frameFooterText.style.color = textColor;
+    }
+
+    function updateFrameSize() {
+        const ratio = document.getElementById('sizeSelect').value;
+        const [w, h] = ratio.split(':');
+        photoFrameContainer.style.aspectRatio = `${w} / ${h}`;
+        populateGridOptions(ratio);
+    }
+
+    function populateGridOptions(ratio) {
+        const gridSelect = document.getElementById('gridSelect');
+        const allowedGrids = ratioToGridMap[ratio] || Object.keys(gridConfigs);
+        
+        gridSelect.innerHTML = '';
+        allowedGrids.forEach(key => {
+            const option = document.createElement('option');
+            option.value = key;
+            option.textContent = gridConfigs[key].label;
+            gridSelect.appendChild(option);
+        });
+
+        updateGrid();
+    }
+
+    function updateGrid() {
+        const gridKey = document.getElementById('gridSelect').value || '4grid';
+        const config = gridConfigs[gridKey] || gridConfigs['4grid'];
+        const imageGrid = document.getElementById('imageGrid');
+
+        imageGrid.style.gridTemplateColumns = `repeat(${config.cols}, 1fr)`;
+        imageGrid.style.gridTemplateRows = `repeat(${config.rows}, 1fr)`;
+        imageGrid.innerHTML = '';
+
+        const count = config.cols * config.rows;
+        startBtn.innerText = `Ambil ${count}x Foto`;
+
+        for (let i = 1; i <= count; i++) {
+            const item = document.createElement('div');
+            item.className = 'grid-item';
+            item.innerHTML = `<img id="img${i}" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='%23333'></svg>">`;
+            imageGrid.appendChild(item);
+        }
+    }
+
+    // --- DETEKSI GESTURE JARI ---
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+    hands.onResults(onHandResults);
+
+    function onHandResults(results) {
+        if (gestureCanvas.width !== video.videoWidth) {
+            gestureCanvas.width = video.videoWidth; gestureCanvas.height = video.videoHeight;
+        }
+        gestureCtx.save(); gestureCtx.clearRect(0, 0, gestureCanvas.width, gestureCanvas.height);
+        handDetected = false;
+        
+        const now = Date.now();
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            handDetected = true; 
+            const landmarks = results.multiHandLandmarks[0];
+            
+            // Visualisasi Rangka Tangan (Hanya saat sensor aktif)
+            if (isSensorActive && typeof drawConnectors !== 'undefined') {
+                drawConnectors(gestureCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                drawLandmarks(gestureCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
+            }
+
+            // 0. TOGGLE SENSOR (1 Jari: Telunjuk Naik)
+            if (now - lastGestureTime > GESTURE_COOLDOWN && isOneFingerOpen(landmarks)) {
+                lastGestureTime = now;
+                isSensorActive = !isSensorActive;
+                updateSensorStatus();
+            }
+
+            // Bekerja Hanya Jika Sensor Aktif
+            if (isSensorActive && now - lastGestureTime > GESTURE_COOLDOWN) {
+                
+                // 1. Gesture 5 Jari (Mulai Foto)
+                if (gestureEnabled && !isCapturing && currentPhotos.length === 0 && isFiveFingersOpen(landmarks)) {
+                    lastGestureTime = now;
+                    gestureEnabled = false; 
+                    startSession();
+                }
+
+                // 2. Gesture 2 Jari / Peace Sign (Ulangi Foto)
+                if (!isCapturing && currentPhotos.length > 0 && isTwoFingersOpen(landmarks)) {
+                    lastGestureTime = now;
+                    resetStudio();
+                }
+
+                // 3. Gesture OK Sign (Unduh Foto)
+                if (!isCapturing && currentPhotos.length > 0 && !isDownloaded && isOkGesture(landmarks)) {
+                    lastGestureTime = now;
+                    isDownloaded = true;
+                    downloadPhoto();
+                }
+            }
+        }
+        updateSensorStatus(); 
+        gestureCtx.restore();
+    }
+
+    // Cek Gesture 1 Jari (Telunjuk)
+    function isOneFingerOpen(landmarks) {
+        const indexOpen = landmarks[8].y < landmarks[6].y;
+        const middleClosed = landmarks[12].y > landmarks[10].y;
+        const ringClosed = landmarks[16].y > landmarks[14].y;
+        const pinkyClosed = landmarks[20].y > landmarks[18].y;
+
+        return indexOpen && middleClosed && ringClosed && pinkyClosed;
+    }
+
+    // Cek Gesture 5 Jari Terbuka
+    function isFiveFingersOpen(landmarks) {
+        const fingerTips = [8, 12, 16, 20];
+        const fingerBase = [6, 10, 14, 18];
+        for (let i = 0; i < fingerTips.length; i++) {
+            if (landmarks[fingerTips[i]].y > landmarks[fingerBase[i]].y) return false;
+        }
+        return true;
+    }
+
+    // Cek Gesture 2 Jari
+    function isTwoFingersOpen(landmarks) {
+        const indexOpen = landmarks[8].y < landmarks[6].y;   
+        const middleOpen = landmarks[12].y < landmarks[10].y; 
+        const ringClosed = landmarks[16].y > landmarks[14].y; 
+        const pinkyClosed = landmarks[20].y > landmarks[18].y;
+
+        return indexOpen && middleOpen && ringClosed && pinkyClosed;
+    }
+
+    // Cek Gesture OK Sign
+    function isOkGesture(landmarks) {
+        const thumbTip = landmarks[4];
+        const indexTip = landmarks[8];
+        const distance = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+
+        const middleOpen = landmarks[12].y < landmarks[10].y;
+        const ringOpen = landmarks[16].y < landmarks[14].y;
+        const pinkyOpen = landmarks[20].y < landmarks[18].y;
+
+        return distance < 0.08 && middleOpen && ringOpen && pinkyOpen;
+    }
+
+    function updateSensorStatus() {
+        if (!isSensorActive) {
+            sensorDot.className = 'status-dot';
+            sensorDot.style.background = '#ff4444';
+            sensorText.innerText = "Sensor OFF (☝️ Acungkan 1 Jari utk ON)";
+            return;
+        }
+
+        sensorDot.style.background = '';
+
+        if (isCapturing) { 
+            sensorDot.className = 'status-dot'; 
+            sensorText.innerText = "Memotret..."; 
+            return; 
+        }
+        
+        if (currentPhotos.length > 0) { 
+            if (handDetected) {
+                sensorDot.className = 'status-dot active'; 
+                sensorText.innerText = "✌️ Ulangi | 👌 Unduh | ☝️ Off"; 
+            } else {
+                sensorDot.className = 'status-dot'; 
+                sensorText.innerText = "✌️ Ulangi / 👌 Unduh"; 
+            }
+            return; 
+        }
+
+        if (handDetected) { 
+            sensorDot.className = 'status-dot active'; 
+            sensorText.innerText = "🖐️ 5 Jari (Start) | ☝️ 1 Jari (Mati)"; 
+        } else { 
+            sensorDot.className = 'status-dot'; 
+            sensorText.innerText = "Angkat tangan 🖐️"; 
+        }
+    }
+
+    async function initCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                const camera = new Camera(video, { onFrame: async () => await hands.send({image: video}), width: video.videoWidth, height: video.videoHeight });
+                camera.start();
+                gestureEnabled = true; startBtn.disabled = false; updateSensorStatus();
+                updateFrameSize();
+            };
+        } catch (err) { sensorText.innerText = "Error Kamera"; }
+    }
+
+    async function startSession() {
+        if (isCapturing) return;
+        const gridKey = document.getElementById('gridSelect').value || '4grid';
+        const config = gridConfigs[gridKey]; const totalPhotos = config.cols * config.rows;
+        isCapturing = true; currentPhotos = []; gestureEnabled = false; isDownloaded = false;
+        startBtn.disabled = true; document.getElementById('postCaptureButtons').style.display = 'none';
+        previewPane.style.transform = 'translateX(120%)';
+        for (let i = 1; i <= totalPhotos; i++) { await countdown(3); snapPhoto(i); await delay(800); }
+        isCapturing = false; startBtn.style.display = 'none'; document.getElementById('postCaptureButtons').style.display = 'flex';
+        previewPane.style.transform = 'translateX(0)';
+    }
+
+    function resetStudio() {
+        currentPhotos = []; isDownloaded = false;
+        startBtn.style.display = 'block'; startBtn.disabled = false;
+        document.getElementById('postCaptureButtons').style.display = 'none';
+        previewPane.style.transform = 'translateX(120%)'; gestureEnabled = true; updateGrid();
+    }
+
+    function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+    function countdown(seconds) {
+        return new Promise((resolve) => {
+            let count = seconds; vOverlay.innerText = count; vOverlay.style.display = 'flex';
+            const timer = setInterval(() => { count--; if (count > 0) { vOverlay.innerText = count; } else { clearInterval(timer); vOverlay.style.display = 'none'; resolve(); } }, 1000);
+        });
+    }
+
+    function setFilter(cls, btn) { video.className = cls; document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
+    
+    function snapPhoto(index) {
+        const ctx = hiddenCanvas.getContext('2d'); hiddenCanvas.width = video.videoWidth; hiddenCanvas.height = video.videoHeight;
+        ctx.translate(hiddenCanvas.width, 0); ctx.scale(-1, 1);
+        ctx.filter = getComputedStyle(video).filter; ctx.drawImage(video, 0, 0);
+        const dataUrl = hiddenCanvas.toDataURL('image/png'); currentPhotos.push(dataUrl);
+        document.getElementById(`img${index}`).src = dataUrl;
+    }
+
+    // --- EXPORT HASIL ---
+    function downloadPhoto() {
+        if(currentPhotos.length === 0) return;
+        const finalCanvas = document.getElementById('finalCanvas'); const ctx = finalCanvas.getContext('2d');
+        const ratio = document.getElementById('sizeSelect').value; const [wRatio, hRatio] = ratio.split(':').map(Number);
+        const gridKey = document.getElementById('gridSelect').value; const config = gridConfigs[gridKey];
+
+        const baseResolution = 2400;
+        let canvasW, canvasH;
+        if(wRatio >= hRatio) { canvasW = baseResolution; canvasH = baseResolution * (hRatio / wRatio);
+        } else { canvasH = baseResolution; canvasW = canvasH * (wRatio / hRatio); }
+        finalCanvas.width = canvasW; finalCanvas.height = canvasH;
+
+        if (activeBgColor.startsWith('gradient-pink')) {
+            let grd = ctx.createLinearGradient(0, 0, canvasW, canvasH);
+            grd.addColorStop(0, '#ff9a9e'); grd.addColorStop(1, '#fecfef');
+            ctx.fillStyle = grd;
+        } else if (activeBgColor.startsWith('gradient-blue')) {
+            let grd = ctx.createLinearGradient(0, 0, canvasW, canvasH);
+            grd.addColorStop(0, '#a1c4fd'); grd.addColorStop(1, '#c2e9fb');
+            ctx.fillStyle = grd;
+        } else if (activeBgColor.startsWith('gradient-peach')) {
+            let grd = ctx.createLinearGradient(0, 0, canvasW, canvasH);
+            grd.addColorStop(0, '#f6d365'); grd.addColorStop(1, '#fda085');
+            ctx.fillStyle = grd;
+        } else {
+            ctx.fillStyle = activeBgColor;
+        }
+        ctx.fillRect(0, 0, canvasW, canvasH);
+
+        const padding = canvasW * 0.03; const footerH = canvasH * 0.08;
+        const availableW = canvasW - (padding * (config.cols + 1));
+        const availableH = canvasH - (padding * (config.rows + 1)) - footerH;
+        const cellW = availableW / config.cols; const cellH = availableH / config.rows;
+
+        let loadedCount = 0;
+        currentPhotos.forEach((photoSrc, i) => {
+            const img = new Image();
+            img.onload = () => {
+                const col = i % config.cols; const row = Math.floor(i / config.cols);
+                const x = padding + col * (cellW + padding); const y = padding + row * (cellH + padding);
+                drawImageProp(ctx, img, x, y, cellW, cellH);
+                loadedCount++;
+
+                if (loadedCount === currentPhotos.length) {
+                    ctx.fillStyle = activeTextColor; 
+                    ctx.font = `bold ${canvasH * 0.035}px Arial`; 
+                    ctx.textAlign = 'center';
+                    ctx.fillText('PHOTOSTUDIO', canvasW / 2, canvasH - (footerH/2.5));
+
+                    const link = document.createElement('a'); 
+                    link.download = `photobooth-${Date.now()}.png`;
+                    link.href = finalCanvas.toDataURL('image/png'); 
+                    link.click();
+                }
+            };
+            img.src = photoSrc;
+        });
+    }
+
+    function drawImageProp(ctx, img, x, y, w, h, offsetX = 0.5, offsetY = 0.5, mode = 'cover') {
+        let iw = img.width, ih = img.height, r = mode === 'cover' ? Math.max(w / iw, h / ih) : Math.min(w / iw, h / ih);
+        let nw = iw * r, nh = ih * r, cx, cy, cw, ch;
+        cw = iw / (nw / w); ch = ih / (nh / h);
+        cx = (iw - cw) * offsetX; cy = (ih - ch) * offsetY;
+        ctx.drawImage(img, cx, cy, cw, ch, x, y, w, h);
+    }
+
+    initCamera();
+</script>
+</body>
+</html>
